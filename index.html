@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Home Dashboard</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0b1120;
+      color: #e5e7eb;
+      min-height: 100vh;
+    }
+    .app { display: flex; min-height: 100vh; }
+    aside {
+      width: 245px;
+      background: #0f172a;
+      border-right: 1px solid #1e293b;
+      padding: 28px 18px;
+      position: fixed;
+      inset: 0 auto 0 0;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 12px;
+      font-size: 20px; font-weight: 800; margin-bottom: 38px;
+    }
+    .brand-icon {
+      width: 42px; height: 42px; border-radius: 12px;
+      display: grid; place-items: center; background: #2563eb;
+      font-size: 22px;
+    }
+    nav a {
+      display: block; color: #94a3b8; text-decoration: none;
+      padding: 13px 14px; border-radius: 10px; margin: 6px 0;
+    }
+    nav a.active, nav a:hover { background: #172554; color: #dbeafe; }
+    .connection {
+      position: absolute; left: 18px; right: 18px; bottom: 24px;
+      background: #111c31; border: 1px solid #23304a;
+      border-radius: 14px; padding: 14px;
+    }
+    .dot {
+      display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+      background: #ef4444; margin-right: 8px;
+    }
+    .dot.online { background: #22c55e; box-shadow: 0 0 12px #22c55e; }
+    main { margin-left: 245px; padding: 34px; width: calc(100% - 245px); }
+    .topbar {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 28px;
+    }
+    h1 { margin: 0 0 6px; font-size: 30px; }
+    .subtitle { color: #94a3b8; }
+    .status-pill {
+      background: #111c31; border: 1px solid #26354f;
+      border-radius: 999px; padding: 10px 16px; color: #94a3b8;
+    }
+    .grid {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: #111827; border: 1px solid #243047;
+      border-radius: 18px; padding: 22px;
+      box-shadow: 0 12px 30px rgba(0,0,0,.15);
+    }
+    .card-head { display: flex; justify-content: space-between; align-items: center; }
+    .label { color: #94a3b8; font-size: 14px; }
+    .icon {
+      width: 46px; height: 46px; display: grid; place-items: center;
+      border-radius: 13px; background: #172554; font-size: 23px;
+    }
+    .value { font-size: 42px; font-weight: 800; margin: 22px 0 4px; }
+    .unit { color: #94a3b8; }
+    .state {
+      margin-top: 18px; display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-radius: 999px; font-size: 13px;
+      background: #172033; color: #cbd5e1;
+    }
+    .state.open { color: #fecaca; background: #3f1d24; }
+    .state.closed { color: #bbf7d0; background: #123524; }
+    .wide { grid-column: span 2; }
+    .chart {
+      height: 220px; display: flex; align-items: flex-end; gap: 8px;
+      padding-top: 20px;
+    }
+    .bar {
+      flex: 1; min-width: 5px; border-radius: 8px 8px 2px 2px;
+      background: #2563eb; opacity: .85;
+      transition: height .4s ease;
+    }
+    .empty-chart {
+      width: 100%; height: 100%; display: grid; place-items: center;
+      color: #64748b; border: 1px dashed #334155; border-radius: 12px;
+    }
+    .events { list-style: none; padding: 0; margin: 0; }
+    .events li {
+      display: flex; justify-content: space-between; gap: 15px;
+      padding: 13px 0; border-bottom: 1px solid #1e293b;
+    }
+    .events li:last-child { border-bottom: 0; }
+    .event-time { color: #64748b; font-size: 13px; white-space: nowrap; }
+    .footer-note { color: #64748b; font-size: 12px; margin-top: 22px; }
+    @media (max-width: 900px) {
+      aside { width: 190px; }
+      main { margin-left: 190px; width: calc(100% - 190px); padding: 22px; }
+      .grid { grid-template-columns: 1fr; }
+      .wide { grid-column: span 1; }
+    }
+    @media (max-width: 650px) {
+      aside { display: none; }
+      main { margin-left: 0; width: 100%; }
+      .topbar { align-items: flex-start; gap: 15px; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">
+      <div class="brand-icon">⌂</div>
+      Smart Home
+    </div>
+    <nav>
+      <a class="active" href="#">Dashboard</a>
+      <a href="#">Temperatura</a>
+      <a href="#">Puerta</a>
+      <a href="#">Ventana</a>
+      <a href="#">Historial</a>
+    </nav>
+
+    <div class="connection">
+      <div class="label">Conexión MQTT</div>
+      <div style="margin-top:8px;font-weight:700">
+        <span id="dot" class="dot"></span><span id="connectionText">Desconectado</span>
+      </div>
+      <div class="footer-note">Mosquitto · WebSocket</div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div>
+        <h1>Casa inteligente</h1>
+        <div class="subtitle">Monitoreo en tiempo real mediante ESP32 + MQTT</div>
+      </div>
+      <div class="status-pill">🏠 Sistema de monitoreo</div>
+    </div>
+
+    <section class="grid">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="label">TEMPERATURA</div>
+            <div class="value"><span id="temperature">--</span>°C</div>
+            <div class="unit">Última medición</div>
+          </div>
+          <div class="icon">🌡️</div>
+        </div>
+        <div id="temperatureStatus" class="state">Esperando datos</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="label">PUERTA PRINCIPAL</div>
+            <div class="value" style="font-size:30px" id="doorText">--</div>
+            <div class="unit">Estado actual</div>
+          </div>
+          <div class="icon">🚪</div>
+        </div>
+        <div id="doorState" class="state">Esperando datos</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="label">VENTANA</div>
+            <div class="value" style="font-size:30px" id="windowText">--</div>
+            <div class="unit">Estado actual</div>
+          </div>
+          <div class="icon">🪟</div>
+        </div>
+        <div id="windowState" class="state">Esperando datos</div>
+      </div>
+
+      <div class="card wide">
+        <div class="card-head">
+          <div>
+            <div class="label">TEMPERATURA</div>
+            <h2 style="margin:6px 0 0">Historial reciente</h2>
+          </div>
+          <div class="label" id="lastUpdate">Sin datos</div>
+        </div>
+        <div id="chart" class="chart">
+          <div class="empty-chart">Esperando mediciones del ESP32...</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="label">EVENTOS</div>
+            <h2 style="margin:6px 0 0">Actividad</h2>
+          </div>
+          <div class="icon">⚡</div>
+        </div>
+        <ul id="events" class="events">
+          <li><span>Esperando eventos MQTT...</span></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  // ============================================================
+  // CONFIGURACIÓN MQTT
+  // ============================================================
+  // Mosquitto debe tener habilitado un listener WebSocket.
+  // Ejemplo habitual: puerto 9001.
+  const MQTT_BROKER = "ws://192.168.1.100:9001";
+
+  // Topics esperados desde el ESP32:
+  const TOPICS = {
+    temperature: "casa/temperatura",
+    door: "casa/puerta",
+    window: "casa/ventana"
+  };
+
+  const temperatureHistory = [];
+  const MAX_HISTORY = 24;
+
+  function addEvent(text) {
+    const list = document.getElementById("events");
+    const li = document.createElement("li");
+    const now = new Date().toLocaleTimeString("es-AR", {
+      hour: "2-digit", minute: "2-digit", second: "2-digit"
+    });
+    li.innerHTML = `<span>${text}</span><span class="event-time">${now}</span>`;
+    list.prepend(li);
+    while (list.children.length > 5) list.removeChild(list.lastChild);
+  }
+
+  function updateChart() {
+    const chart = document.getElementById("chart");
+    if (!temperatureHistory.length) return;
+    chart.innerHTML = "";
+    const min = Math.min(...temperatureHistory);
+    const max = Math.max(...temperatureHistory);
+    temperatureHistory.forEach(t => {
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      const normalized = max === min ? 55 : 15 + ((t - min) / (max - min)) * 75;
+      bar.style.height = normalized + "%";
+      bar.title = t.toFixed(1) + " °C";
+      chart.appendChild(bar);
+    });
+  }
+
+  function setState(elementId, text, isOpen) {
+    const el = document.getElementById(elementId);
+    el.textContent = text;
+    el.className = "state " + (isOpen ? "open" : "closed");
+  }
+
+  function handleMessage(topic, payload) {
+    const value = payload.trim();
+
+    if (topic === TOPICS.temperature) {
+      const temp = parseFloat(value);
+      if (!Number.isNaN(temp)) {
+        document.getElementById("temperature").textContent = temp.toFixed(1);
+        document.getElementById("temperatureStatus").textContent =
+          temp > 30 ? "Temperatura alta" : temp < 15 ? "Temperatura baja" : "Temperatura normal";
+        document.getElementById("temperatureStatus").className = "state";
+        temperatureHistory.push(temp);
+        if (temperatureHistory.length > MAX_HISTORY) temperatureHistory.shift();
+        updateChart();
+        document.getElementById("lastUpdate").textContent =
+          "Actualizado " + new Date().toLocaleTimeString("es-AR");
+        addEvent(`🌡️ Temperatura: ${temp.toFixed(1)} °C`);
+      }
+    }
+
+    if (topic === TOPICS.door) {
+      const open = ["OPEN", "ABIERTA", "1", "open", "abierta"].includes(value);
+      document.getElementById("doorText").textContent = open ? "ABIERTA" : "CERRADA";
+      setState("doorState", open ? "● Puerta abierta" : "● Puerta cerrada", open);
+      addEvent(open ? "🚪 La puerta fue abierta" : "🚪 La puerta fue cerrada");
+    }
+
+    if (topic === TOPICS.window) {
+      const open = ["OPEN", "ABIERTA", "1", "open", "abierta"].includes(value);
+      document.getElementById("windowText").textContent = open ? "ABIERTA" : "CERRADA";
+      setState("windowState", open ? "● Ventana abierta" : "● Ventana cerrada", open);
+      addEvent(open ? "🪟 La ventana fue abierta" : "🪟 La ventana fue cerrada");
+    }
+  }
+
+  function connectMQTT() {
+    const clientId = "dashboard-" + Math.random().toString(16).slice(2);
+
+    const client = mqtt.connect(MQTT_BROKER, {
+      clientId,
+      clean: true,
+      reconnectPeriod: 3000,
+      connectTimeout: 5000
+    });
+
+    client.on("connect", () => {
+      document.getElementById("dot").classList.add("online");
+      document.getElementById("connectionText").textContent = "Conectado";
+      addEvent("✓ Dashboard conectado a Mosquitto");
+
+      Object.values(TOPICS).forEach(topic => {
+        client.subscribe(topic, err => {
+          if (err) console.error("Error suscribiendo:", topic, err);
+        });
+      });
+    });
+
+    client.on("message", (topic, message) => {
+      handleMessage(topic, message.toString());
+    });
+
+    client.on("reconnect", () => {
+      document.getElementById("connectionText").textContent = "Reconectando...";
+      document.getElementById("dot").classList.remove("online");
+    });
+
+    client.on("offline", () => {
+      document.getElementById("connectionText").textContent = "Desconectado";
+      document.getElementById("dot").classList.remove("online");
+    });
+
+    client.on("error", err => {
+      console.error("MQTT:", err);
+    });
+  }
+
+  connectMQTT();
+</script>
+</body>
+</html>
